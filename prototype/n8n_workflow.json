@@ -1,1 +1,45 @@
-# Exported n8n workflow
+{
+  "name": "Driver Safety Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "driver-data",
+        "responseMode": "lastNode",
+        "responseData": "allEntries"
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = items[0].json;\nreturn [{json: {fatigue: data.fatigue_level, distraction: data.distraction, road_score: data.road_score}}];"
+      },
+      "name": "Extract Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "temperature": 0.5,
+        "top_p": 1,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "stop": [],
+        "prompt": "={{$json[\"fatigue\"]}},{{$json[\"distraction\"]}},{{$json[\"road_score\"]}}\nAnalyze and generate actionable driver safety tips."
+      },
+      "name": "OpenAI",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [750, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {"main": [[{"node": "Extract Data","type": "main","index": 0}]]},
+    "Extract Data": {"main": [[{"node": "OpenAI","type": "main","index": 0}]]}
+  }
+}

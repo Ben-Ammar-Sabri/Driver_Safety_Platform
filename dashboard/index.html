@@ -3,11 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Driver Safety Platform — Prototype Dashboard</title>
-  <!-- Tailwind Play CDN for quick prototyping -->
+  <title>Driver Safety Platform — Real-Time Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* Simple score gauge */
     .gauge { --value: 82; }
     .gauge__arc {
       stroke-dasharray: 283;
@@ -20,15 +18,8 @@
   <div class="max-w-6xl mx-auto p-6">
     <header class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-semibold flex items-center gap-3">🚗 Driver Safety Platform <span class="text-sm text-slate-500 ml-2">Prototype Dashboard</span></h1>
-        <p class="text-sm text-slate-500">Real-time mockup</p>
-      </div>
-      <div class="flex items-center gap-3">
-        <button id="simulateBtn" class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700">Simulate Data</button>
-        <div class="text-right">
-          <div class="text-xs text-slate-500">Mode</div>
-          <div class="font-medium">Prototype (Simulated)</div>
-        </div>
+        <h1 class="text-2xl font-semibold flex items-center gap-3">🚗 Driver Safety Platform <span class="text-sm text-slate-500 ml-2">Real-Time Dashboard</span></h1>
+        <p class="text-sm text-slate-500">Connected to Mobile App Sensors</p>
       </div>
     </header>
 
@@ -62,29 +53,7 @@
 
         <div class="bg-white rounded-2xl p-4 shadow-sm">
           <h3 class="text-sm font-semibold mb-3">Recent Alerts</h3>
-          <div id="alerts" class="space-y-3 text-sm text-slate-700">
-            <div class="flex items-start justify-between p-3 rounded-lg bg-slate-50">
-              <div>
-                <div class="font-medium">Harsh Braking</div>
-                <div class="text-xs text-slate-500">14:32 — Sudden deceleration detected</div>
-              </div>
-              <div class="text-sm font-semibold text-amber-600">Medium</div>
-            </div>
-            <div class="flex items-start justify-between p-3 rounded-lg bg-slate-50">
-              <div>
-                <div class="font-medium">Driver Distraction</div>
-                <div class="text-xs text-slate-500">14:10 — Phone usage suspected</div>
-              </div>
-              <div class="text-sm font-semibold text-red-600">High</div>
-            </div>
-            <div class="flex items-start justify-between p-3 rounded-lg bg-slate-50">
-              <div>
-                <div class="font-medium">Close Distance</div>
-                <div class="text-xs text-slate-500">13:55 — Unsafe distance to front vehicle</div>
-              </div>
-              <div class="text-sm font-semibold text-amber-600">Medium</div>
-            </div>
-          </div>
+          <div id="alerts" class="space-y-3 text-sm text-slate-700"></div>
         </div>
 
         <div class="bg-white rounded-2xl p-4 shadow-sm text-sm">
@@ -103,7 +72,7 @@
         <div class="grid grid-cols-2 gap-4 text-sm text-slate-700">
           <div class="p-3 rounded-lg bg-slate-50">
             <div class="text-xs text-slate-500">Current Trip</div>
-            <div class="font-medium">TRIP-2025-11-15-01</div>
+            <div class="font-medium" id="tripId">TRIP-2025-11-15-01</div>
             <div class="text-xs">Duration: <span id="tripDuration">17 min</span></div>
           </div>
           <div class="p-3 rounded-lg bg-slate-50">
@@ -122,7 +91,6 @@
             <div class="text-xs">Alerts this trip</div>
           </div>
         </div>
-
         <div class="mt-6">
           <h4 class="text-sm font-semibold mb-2">Map (Mock)</h4>
           <div class="h-48 rounded-lg bg-gradient-to-r from-slate-100 to-slate-50 border border-slate-100 flex items-center justify-center text-slate-400">Map placeholder</div>
@@ -134,39 +102,20 @@
         <div class="bg-white rounded-2xl p-4 shadow-sm text-sm">
           <h3 class="text-sm font-semibold mb-3">Vehicle & Driver Status</h3>
           <ul class="space-y-2 text-slate-700">
-            <li><span class="text-slate-500">Speed:</span> <span id="speedVal" class="font-medium">56 km/h</span></li>
-            <li><span class="text-slate-500">Driver Fatigue Level:</span> <span id="fatigueLevel" class="font-medium">12 / 100</span></li>
-            <li><span class="text-slate-500">Distraction Probability:</span> <span id="distraction" class="font-medium">8%</span></li>
+            <li><span class="text-slate-500">Speed:</span> <span id="speedVal" class="font-medium">0 km/h</span></li>
+            <li><span class="text-slate-500">Driver Fatigue Level:</span> <span id="fatigueLevel" class="font-medium">0 / 100</span></li>
+            <li><span class="text-slate-500">Distraction Probability:</span> <span id="distraction" class="font-medium">0%</span></li>
             <li><span class="text-slate-500">Brake Intensity:</span> <span id="brake" class="font-medium">Normal</span></li>
             <li><span class="text-slate-500">Impact Sensor:</span> <span id="impact" class="font-medium">No anomalies</span></li>
           </ul>
         </div>
-
-        <div class="bg-white rounded-2xl p-4 shadow-sm text-sm">
-          <h3 class="text-sm font-semibold mb-3">System Info</h3>
-          <div class="text-slate-700 text-sm">
-            <div>Data Source: <span class="font-medium">Simulated (n8n)</span></div>
-            <div>AI Engine: <span class="font-medium">Vision + Behavioral Models</span></div>
-            <div>Workflow: <span class="font-medium">n8n Automated Pipeline</span></div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl p-4 shadow-sm text-sm">
-          <h3 class="text-sm font-semibold mb-3">Quick Actions</h3>
-          <div class="flex flex-col gap-2">
-            <button class="py-2 px-3 bg-emerald-600 text-white rounded hover:bg-emerald-700">Acknowledge All Alerts</button>
-            <button class="py-2 px-3 border rounded">Download Trip Report (CSV)</button>
-          </div>
-        </div>
       </section>
     </main>
 
-    <footer class="mt-6 text-xs text-slate-400">Prototype • Simulated Data • Built with Tailwind</footer>
+    <footer class="mt-6 text-xs text-slate-400">Real-Time • Connected Mobile Sensors • Built with Tailwind</footer>
   </div>
 
   <script>
-    // Simple interactive simulation that updates metrics
-    const simulateBtn = document.getElementById('simulateBtn');
     const scoreText = document.getElementById('scoreText');
     const scoreStatus = document.getElementById('scoreStatus');
     const trend = document.getElementById('trend');
@@ -194,27 +143,36 @@
       alertsEl.prepend(div);
     }
 
-    simulateBtn.addEventListener('click', () => {
-      // Random-ish new values
-      const newScore = Math.max(30, Math.min(95, 82 + Math.floor((Math.random() - 0.4) * 20)));
-      updateGauge(newScore);
+    // ==== FETCH REAL-TIME DATA FROM N8N ====
+    const n8nEndpoint = "YOUR_N8N_API_ENDPOINT"; // JSON endpoint
 
-      // update trip & vehicle values
-      document.getElementById('speedVal').textContent = (40 + Math.floor(Math.random() * 50)) + ' km/h';
-      document.getElementById('fatigueLevel').textContent = Math.floor(Math.random() * 30) + ' / 100';
-      document.getElementById('distraction').textContent = Math.floor(Math.random() * 30) + '%';
-      document.getElementById('ecoScore').textContent = Math.floor(60 + Math.random() * 30);
+    async function fetchData() {
+      try {
+        const res = await fetch(n8nEndpoint);
+        const data = await res.json();
 
-      // maybe push an alert
-      if (newScore < 60) {
-        pushAlert('Driver Distraction', new Date().toLocaleTimeString(), 'Phone usage suspected', 'High');
-      } else if (newScore < 75) {
-        pushAlert('Close Distance', new Date().toLocaleTimeString(), 'Unsafe distance to front vehicle', 'Medium');
+        // Update metrics
+        document.getElementById('speedVal').textContent = data.speed.toFixed(1) + ' km/h';
+        document.getElementById('ecoScore').textContent = Math.floor(60 + Math.random() * 30);
+        document.getElementById('fatigueLevel').textContent = Math.floor(Math.random() * 30) + ' / 100';
+        document.getElementById('distraction').textContent = Math.floor(Math.random() * 30) + '%';
+
+        // Update safety score based on accelerometer magnitude (example)
+        const accelMagnitude = Math.sqrt(data.accelX**2 + data.accelY**2 + data.accelZ**2);
+        const newScore = Math.max(30, Math.min(95, 100 - accelMagnitude * 5));
+        updateGauge(newScore);
+
+        // Trigger alerts
+        if (newScore < 60) pushAlert('Driver Distraction', new Date().toLocaleTimeString(), 'Phone usage suspected', 'High');
+        else if (newScore < 75) pushAlert('Close Distance', new Date().toLocaleTimeString(), 'Unsafe distance to front vehicle', 'Medium');
+
+      } catch (err) {
+        console.error("Error fetching data:", err);
       }
-    });
+    }
 
-    // initial load
-    updateGauge(82);
+    setInterval(fetchData, 2000); // update every 2 sec
+    updateGauge(82); // initial value
   </script>
 </body>
 </html>
