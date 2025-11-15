@@ -7,4 +7,4 @@
 - **n8n Workflow Automation**  
 - **Alert Engine**  
 - **Database / Storage Layer**  
-- **Real-time Web Dashboard**
+- **Real-time UI Dashboard**
