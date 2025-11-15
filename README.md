@@ -38,7 +38,7 @@ A complete end-to-end platform consisting of:
 - Safety Score computation  
 - Automatic alert generation
 
-### 🔹 3. Automated n8n Workflow
+### 🔹 3. Automated Workflow
 - Simulated or real sensor data ingestion  
 - AI processing pipeline  
 - Real-time scoring  
