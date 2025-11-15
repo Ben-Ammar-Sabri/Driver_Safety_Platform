@@ -46,7 +46,6 @@ A complete end-to-end platform consisting of:
 - Logging to Google Sheets / database
 
 ### 🔹 4. User Dashboard
-- Real-time global driver score  
 - List of recent alerts  
 - Vehicle health and status  
 - Trip history  
