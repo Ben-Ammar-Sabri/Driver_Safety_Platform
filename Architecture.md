@@ -8,3 +8,5 @@
 - **Alert Engine**  
 - **Database / Storage Layer**  
 - **Real-time UI Dashboard**
+  
+Sensors and vision feed AI in the cloud → AI turns raw signals into insights → Insights trigger automated actions → Actions roll up into a clear driver safety and risk dashboard.
