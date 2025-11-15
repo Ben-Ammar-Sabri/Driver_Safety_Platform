@@ -1,4 +1,4 @@
-# 🚗 Driver Safety Platform — Quick Overview
+# 🚗 Driver Safety Platform
 
 Hello everyone,  
 
