@@ -68,15 +68,10 @@ Stable network connection
 This allows the mobile app to simulate all hardware functions, including driver monitoring, road analysis, and telematics data collection.
 
 In production, this mobile-based module will be replaced by a dedicated in-vehicle hardware unit, while the backend, AI engine, and dashboard remain unchanged.
-## 3.  System Architecture
-
-**Cameras & Sensors → AI Engine (Vision + GPT Models) → n8n Workflow → Web Dashboard**
-
-Each component works together to provide a fully automated, intelligent monitoring system.
 
 ---
 
-## 4.  Impact – Insurance, Fleets, Families
+## 3.  Impact – Insurance, Fleets, Families
 
 The Driver Safety Platform enables:  
 - **Accident reduction**  
