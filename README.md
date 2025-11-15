@@ -6,7 +6,7 @@ The platform combines an embedded hardware module, advanced AI processing, an au
 
 ---
 
-## 1. 🚨 The Problem
+## 1.  The Problem
 
 Road accidents are commonly caused by:  
 - Driver distraction  
@@ -22,7 +22,7 @@ Additional challenges include:
 
 ---
 
-## 2. ✅ Our Solution: Driver Safety Platform
+## 2.  Our Solution: Driver Safety Platform
 
 A complete end-to-end platform consisting of:
 
@@ -54,7 +54,7 @@ A complete end-to-end platform consisting of:
 
 ---
 
-## 3. 🧩 System Architecture
+## 3.  System Architecture
 
 **Cameras & Sensors → AI Engine (Vision + GPT Models) → n8n Workflow → Web Dashboard**
 
@@ -62,7 +62,7 @@ Each component works together to provide a fully automated, intelligent monitori
 
 ---
 
-## 4. 🌍 Impact – Insurance, Fleets, Families
+## 4.  Impact – Insurance, Fleets, Families
 
 The Driver Safety Platform enables:  
 - **Accident reduction**  
