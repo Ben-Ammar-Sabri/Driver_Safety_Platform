@@ -45,7 +45,7 @@ A complete end-to-end platform consisting of:
 - Automatic alerts  
 - Logging to Google Sheets / database
 
-### 🔹 4. Web Dashboard
+### 🔹 4. User Dashboard
 - Real-time global driver score  
 - List of recent alerts  
 - Vehicle health and status  
