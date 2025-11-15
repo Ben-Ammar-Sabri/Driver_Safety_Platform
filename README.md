@@ -53,7 +53,22 @@ A complete end-to-end platform consisting of:
 - AI-driven driving recommendations
 
 ---
+Prototype Note: Mobile App Replacing Hardware
 
+For the prototype phase, the embedded hardware module is temporarily replaced by a mobile application.
+Modern smartphones already include the essential components we need:
+
+Front & rear cameras
+
+Accelerometer & gyroscope
+
+GPS
+
+Stable network connection
+
+This allows the mobile app to simulate all hardware functions, including driver monitoring, road analysis, and telematics data collection.
+
+In production, this mobile-based module will be replaced by a dedicated in-vehicle hardware unit, while the backend, AI engine, and dashboard remain unchanged.
 ## 3.  System Architecture
 
 **Cameras & Sensors → AI Engine (Vision + GPT Models) → n8n Workflow → Web Dashboard**
