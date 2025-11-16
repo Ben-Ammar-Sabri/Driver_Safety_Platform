@@ -19,7 +19,7 @@ The platform is built around three key components:
 - Behavioral algorithms compute a **Safety Score** representing risk levels  
 - Alerts are triggered immediately if the score drops below a threshold
 
-### 3. n8n Automation Workflow
+### 3. Automation Workflow
 - Automates the entire data flow  
 - Receives simulated sensor data, sends it to the AI, calculates scores, logs events, and manages alerts  
 - Fully autonomous operation
