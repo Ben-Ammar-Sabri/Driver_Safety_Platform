@@ -73,7 +73,7 @@ In production, this mobile-based module will be replaced by a dedicated in-vehic
 
 ## 3.  Impact – Insurance, Fleets, Families
 
-The Driver Safety Platform enables:  
+The Driver Safety Platform enables :  
 - **Accident reduction**  
 - **Lower insurance costs**  
 - **24/7 automated monitoring**  
