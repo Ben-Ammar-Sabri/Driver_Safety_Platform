@@ -1,0 +1,29 @@
+name: driver_safety_app
+description: A new Flutter project
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.3 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  camera: ^0.10.5+7
+  web_socket_channel: ^2.4.0
+  audioplayers: ^6.0.0
+  image: ^4.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  assets:
+    - sounds/alarm.wav
+    - sounds/warning.wav
+
+  uses-material-design: true
