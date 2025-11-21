@@ -56,13 +56,15 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   bool _isMonitoring = false;
   bool _cameraEnabled = true;
   bool _isCameraInitialized = false;
-  bool _isStreamActive = false;
+  bool _isProcessingFrame = false;  // NEW: Prevent frame processing overlap
+  int _frameCount = 0;  // NEW: Track frames sent
+  DateTime? _lastFrameTime;  // NEW: Track timing
+  
   double _score = 85.0;
   double _speed = 60.0;
   double _acceleration = 1.2;
   Color _borderColor = Colors.transparent;
   String _alertMessage = '';
-  Timer? _frameTimer;
   Timer? _dataTimer;
 
   @override
@@ -140,6 +142,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,  // IMPROVED: Better format
       );
       await _driverCam!.initialize();
       debugPrint('✅ Caméra conducteur (frontale) initialisée: ${_driverCam!.value.previewSize}');
@@ -218,14 +221,12 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   void _handleAlert(Map<String, dynamic> alert) {
     debugPrint('🔔 Traitement alert: $alert');
     
-    // FIXED: Use 'message' instead of 'status'
     final message = alert['message'] ?? alert['status'] ?? '';
     final isCritical = alert['critical'] == true;
     
     debugPrint('  - message: $message');
     debugPrint('  - critical: $isCritical');
     
-    // Only trigger alert if not "OK"
     if (message != 'OK' && message.isNotEmpty) {
       _triggerAlert(isAlarm: isCritical, message: message);
       _updateScore(isCritical ? -5 : -2);
@@ -316,25 +317,26 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   void _startMonitoring() {
     debugPrint('🚀 Démarrage de la surveillance...');
     
-    // FIXED: Increased frame rate from 1 second to 333ms (~3 FPS)
-    _frameTimer = Timer.periodic(const Duration(milliseconds: 333), (_) async {
-      if (_driverCam?.value.isInitialized == true && !_isStreamActive) {
-        try {
-          _isStreamActive = true;
-          await _driverCam!.startImageStream((image) {
-            _sendFrame(image, "driver");
-          });
-          
-          // Stop stream after a short delay
-          await Future.delayed(const Duration(milliseconds: 100));
-          await _driverCam!.stopImageStream();
-          _isStreamActive = false;
-        } catch (e) {
-          debugPrint('❌ Erreur stream caméra: $e');
-          _isStreamActive = false;
+    _frameCount = 0;
+    _lastFrameTime = DateTime.now();
+    
+    // IMPROVED: Use continuous image stream with proper throttling
+    if (_driverCam?.value.isInitialized == true) {
+      _driverCam!.startImageStream((CameraImage image) {
+        // Only process if not already processing and enough time has passed
+        final now = DateTime.now();
+        final timeSinceLastFrame = _lastFrameTime != null 
+            ? now.difference(_lastFrameTime!).inMilliseconds 
+            : 1000;
+        
+        // Target ~2 FPS (500ms between frames)
+        if (!_isProcessingFrame && timeSinceLastFrame >= 500) {
+          _isProcessingFrame = true;
+          _lastFrameTime = now;
+          _sendFrame(image, "driver");
         }
-      }
-    });
+      });
+    }
 
     // Simulation données dynamiques
     _dataTimer = Timer.periodic(const Duration(seconds: 2), (_) {
@@ -350,48 +352,68 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   void _stopMonitoring() {
     debugPrint('⏹️ Arrêt de la surveillance...');
     
-    _frameTimer?.cancel();
     _dataTimer?.cancel();
     
     try {
-      if (_isStreamActive) {
-        _driverCam?.stopImageStream();
-        _isStreamActive = false;
-      }
+      _driverCam?.stopImageStream();
+      _isProcessingFrame = false;
     } catch (e) {
       debugPrint('❌ Erreur arrêt stream: $e');
     }
     
-    debugPrint('✅ Surveillance arrêtée');
+    debugPrint('✅ Surveillance arrêtée (${_frameCount} frames envoyés)');
   }
 
-  void _sendFrame(CameraImage image, String camType) async {
+  Future<void> _sendFrame(CameraImage image, String camType) async {
     try {
-      // FIXED: Reduced downsampling from /4 to /2 for better quality
-      // Original size might be 640x480, this gives 320x240
-      final downsampleFactor = 2; // Changed from 4
+      _frameCount++;
       
-      final imgBuffer = img.Image(
-        width: image.width ~/ downsampleFactor, 
-        height: image.height ~/ downsampleFactor
-      );
+      // IMPROVED: Better YUV420 to RGB conversion
+      final int width = image.width;
+      final int height = image.height;
+      
+      // Downsample for efficiency (320x240 approximately)
+      final int targetWidth = 320;
+      final int targetHeight = (height * targetWidth / width).round();
+      
+      final imgBuffer = img.Image(width: targetWidth, height: targetHeight);
       
       final yPlane = image.planes[0].bytes;
-
-      // FIXED: Updated loop to match new downsample factor
-      for (int y = 0; y < image.height; y += downsampleFactor) {
-        for (int x = 0; x < image.width; x += downsampleFactor) {
-          final pixel = yPlane[y * image.width + x];
-          imgBuffer.setPixelRgba(
-            x ~/ downsampleFactor, 
-            y ~/ downsampleFactor, 
-            pixel, pixel, pixel, 255
-          );
+      final uPlane = image.planes[1].bytes;
+      final vPlane = image.planes[2].bytes;
+      
+      final int uvRowStride = image.planes[1].bytesPerRow;
+      final int uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
+      
+      // Scale factors
+      final double scaleX = width / targetWidth;
+      final double scaleY = height / targetHeight;
+      
+      for (int y = 0; y < targetHeight; y++) {
+        for (int x = 0; x < targetWidth; x++) {
+          final int srcX = (x * scaleX).round();
+          final int srcY = (y * scaleY).round();
+          
+          final int yIndex = srcY * width + srcX;
+          final int uvIndex = (srcY ~/ 2) * uvRowStride + (srcX ~/ 2) * uvPixelStride;
+          
+          if (yIndex < yPlane.length && uvIndex < uPlane.length && uvIndex < vPlane.length) {
+            final int yValue = yPlane[yIndex];
+            final int uValue = uPlane[uvIndex];
+            final int vValue = vPlane[uvIndex];
+            
+            // YUV to RGB conversion
+            int r = (yValue + 1.370705 * (vValue - 128)).round().clamp(0, 255);
+            int g = (yValue - 0.337633 * (uValue - 128) - 0.698001 * (vValue - 128)).round().clamp(0, 255);
+            int b = (yValue + 1.732446 * (uValue - 128)).round().clamp(0, 255);
+            
+            imgBuffer.setPixelRgba(x, y, r, g, b, 255);
+          }
         }
       }
 
-      // FIXED: Increased JPEG quality from 40 to 70
-      final jpeg = img.encodeJpg(imgBuffer, quality: 70);
+      // IMPROVED: Better JPEG encoding with quality 80
+      final jpeg = img.encodeJpg(imgBuffer, quality: 80);
       final base64String = base64Encode(jpeg);
 
       final payload = jsonEncode({
@@ -402,12 +424,22 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       
       _channel?.sink.add(payload);
       
-      // Less frequent debug logs to avoid spam
-      if (DateTime.now().second % 3 == 0) {
-        debugPrint('📤 Frame envoyé: ${imgBuffer.width}x${imgBuffer.height}, taille: ${(base64String.length / 1024).toStringAsFixed(1)} KB');
+      // Log every 5 frames
+      if (_frameCount % 5 == 0) {
+        final fps = _lastFrameTime != null 
+            ? 1000 / DateTime.now().difference(_lastFrameTime!).inMilliseconds 
+            : 0;
+        debugPrint('📤 Frame #$_frameCount envoyé: ${imgBuffer.width}x${imgBuffer.height}, '
+                   'taille: ${(base64String.length / 1024).toStringAsFixed(1)} KB, '
+                   'FPS: ${fps.toStringAsFixed(1)}');
       }
-    } catch (e) {
+      
+    } catch (e, stackTrace) {
       debugPrint('❌ Erreur envoi frame: $e');
+      debugPrint('Stack: $stackTrace');
+    } finally {
+      // Allow next frame to be processed
+      _isProcessingFrame = false;
     }
   }
 
@@ -417,13 +449,10 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     
     _borderAnimationController.dispose();
     _pulseAnimationController.dispose();
-    _frameTimer?.cancel();
     _dataTimer?.cancel();
     
     try {
-      if (_isStreamActive) {
-        _driverCam?.stopImageStream();
-      }
+      _driverCam?.stopImageStream();
     } catch (e) {
       debugPrint('Erreur lors de l\'arrêt du stream: $e');
     }
