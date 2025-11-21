@@ -64,7 +64,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   Color _borderColor = Colors.transparent;
   String _alertMessage = '';
   Timer? _frameTimer;
-  Timer? _speedTimer;
   
   // GPS/Location
   LatLng _currentLocation = LatLng(36.8065, 10.1815); // Tunis par défaut
@@ -245,7 +244,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       _alertMessage = isAlarm ? 'ALARME!' : 'Avertissement';
     });
 
-    _borderAnimationController.forward(from: 0).then(() {
+    borderAnimationController.forward(from: 0).then(() {
       _borderAnimationController.reverse();
     });
     
@@ -303,7 +302,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
 
   void _startMonitoring() {
     // Timer pour envoyer les frames à 3 FPS
-    _frameTimer = Timer.periodic(const Duration(milliseconds: 333), () {
+    _frameTimer = Timer.periodic(const Duration(milliseconds: 333), (timer) {
       if (_driverCam?.value.isInitialized == true) {
         try {
           _driverCam!.startImageStream((image) {
@@ -357,7 +356,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     _borderAnimationController.dispose();
     _pulseAnimationController.dispose();
     _frameTimer?.cancel();
-    _speedTimer?.cancel();
     _positionStream?.cancel();
     _driverCam?.dispose();
     _roadCam?.dispose();
