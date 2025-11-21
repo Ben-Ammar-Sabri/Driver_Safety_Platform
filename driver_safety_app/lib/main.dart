@@ -56,6 +56,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   bool _isMonitoring = false;
   bool _cameraEnabled = true;
   bool _isCameraInitialized = false;
+  bool _isStreamActive = false;
   double _score = 85.0;
   double _speed = 60.0;
   double _acceleration = 1.2;
@@ -70,10 +71,9 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     _initializeAnimations();
     _initializeCameras();
     _connectWebSocket();
-    _testAudio(); // Test audio au démarrage
+    _testAudio();
   }
 
-  // Test audio au démarrage
   void _testAudio() async {
     await Future.delayed(const Duration(seconds: 2));
     debugPrint('🧪 Test audio au démarrage...');
@@ -110,12 +110,10 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     try {
       debugPrint('🔍 Nombre de caméras disponibles: ${widget.cameras.length}');
       
-      // Afficher toutes les caméras disponibles
       for (int i = 0; i < widget.cameras.length; i++) {
         debugPrint('📷 Caméra $i: ${widget.cameras[i].lensDirection} - ${widget.cameras[i].name}');
       }
       
-      // Trouver UNIQUEMENT la caméra frontale (selfie)
       CameraDescription? frontCamera;
       
       for (var camera in widget.cameras) {
@@ -126,9 +124,8 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         }
       }
 
-      // Si pas de caméra frontale trouvée, chercher par index
       if (frontCamera == null && widget.cameras.length > 1) {
-        frontCamera = widget.cameras[1]; // Généralement index 1 = frontale
+        frontCamera = widget.cameras[1];
         debugPrint('⚠️ Utilisation caméra index 1 (supposée frontale)');
       } else if (frontCamera == null && widget.cameras.isNotEmpty) {
         frontCamera = widget.cameras[0];
@@ -139,22 +136,20 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         throw Exception('Aucune caméra disponible');
       }
 
-      // Initialiser LA MÊME caméra frontale pour conducteur ET route
       _driverCam = CameraController(
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
       );
       await _driverCam!.initialize();
-      debugPrint('✅ Caméra conducteur (frontale) initialisée');
+      debugPrint('✅ Caméra conducteur (frontale) initialisée: ${_driverCam!.value.previewSize}');
 
-      // Utiliser la MÊME caméra pour les deux vues
       _roadCam = _driverCam;
       debugPrint('✅ Même caméra utilisée pour les deux vues');
 
       if (mounted) {
         setState(() => _isCameraInitialized = true);
-        debugPrint('🎉 Caméra frontale prête pour les deux vues!');
+        debugPrint('🎉 Caméra frontale prête!');
       }
     } catch (e, stackTrace) {
       debugPrint('❌ ERREUR initialisation caméras: $e');
@@ -174,45 +169,86 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
 
   void _connectWebSocket() {
     try {
+      // IMPORTANT: Change this IP to your backend server IP
       _channel = IOWebSocketChannel.connect('ws://192.168.1.159:8765/ws');
+      debugPrint('🔌 Tentative de connexion WebSocket...');
+      
       _channel?.stream.listen(
         (message) {
-          final alert = jsonDecode(message);
-          _handleAlert(alert);
+          debugPrint('📨 Message WebSocket reçu: $message');
+          try {
+            final alert = jsonDecode(message);
+            debugPrint('🔔 Alert décodé: $alert');
+            _handleAlert(alert);
+          } catch (e) {
+            debugPrint('❌ Erreur décodage JSON: $e');
+          }
         },
-        onError: (error) => debugPrint('WebSocket erreur: $error'),
+        onError: (error) {
+          debugPrint('❌ WebSocket erreur: $error');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Erreur WebSocket: $error'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        },
+        onDone: () {
+          debugPrint('⚠️ WebSocket connexion fermée');
+        },
       );
+      
+      debugPrint('✅ WebSocket connecté');
     } catch (e) {
-      debugPrint('Connexion WebSocket échouée: $e');
+      debugPrint('❌ Connexion WebSocket échouée: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Impossible de se connecter au serveur: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
   void _handleAlert(Map<String, dynamic> alert) {
+    debugPrint('🔔 Traitement alert: $alert');
+    
+    // FIXED: Use 'message' instead of 'status'
+    final message = alert['message'] ?? alert['status'] ?? '';
     final isCritical = alert['critical'] == true;
-    final message = alert['message'] ?? '';
-    _triggerAlert(isAlarm: isCritical, message: message);
-    _updateScore(isCritical ? -5 : -2);
+    
+    debugPrint('  - message: $message');
+    debugPrint('  - critical: $isCritical');
+    
+    // Only trigger alert if not "OK"
+    if (message != 'OK' && message.isNotEmpty) {
+      _triggerAlert(isAlarm: isCritical, message: message);
+      _updateScore(isCritical ? -5 : -2);
+    }
   }
 
   Future<void> _triggerAlert({required bool isAlarm, String message = ''}) async {
+    debugPrint('🚨 Déclenchement alert: isAlarm=$isAlarm, message=$message');
+    
     setState(() {
       _borderColor = isAlarm ? const Color(0xFFFF1744) : const Color(0xFFFF9100);
-      _alertMessage = isAlarm ? 'ALARME!' : 'Avertissement';
+      _alertMessage = message.isNotEmpty ? message : (isAlarm ? 'ALARME!' : 'Avertissement');
     });
 
     _borderAnimationController.forward(from: 0).then((_) {
       _borderAnimationController.reverse();
     });
     
-    // Jouer le son
     try {
       final soundPath = isAlarm ? 'alarm.wav' : 'warning.wav';
-      debugPrint('🔊 Lecture du son: $soundPath');
+      debugPrint('🔊 Tentative lecture du son: $soundPath');
       
-      // Arrêter le son précédent
       await _audioPlayer.stop();
-      
-      // Jouer le nouveau son
       await _audioPlayer.play(
         AssetSource('sounds/$soundPath'),
         volume: 1.0,
@@ -222,11 +258,9 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       debugPrint('✅ Son joué: $soundPath');
     } catch (e) {
       debugPrint('❌ Erreur son: $e');
-      // Vibration comme fallback
-      debugPrint('💡 Astuce: Vérifiez le volume du téléphone');
     }
 
-    Future.delayed(const Duration(seconds: 2), () {
+    Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         setState(() {
           _borderColor = Colors.transparent;
@@ -280,16 +314,24 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   }
 
   void _startMonitoring() {
-    // Timer pour envoyer les frames (une seule caméra utilisée)
-    _frameTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_driverCam?.value.isInitialized == true) {
+    debugPrint('🚀 Démarrage de la surveillance...');
+    
+    // FIXED: Increased frame rate from 1 second to 333ms (~3 FPS)
+    _frameTimer = Timer.periodic(const Duration(milliseconds: 333), (_) async {
+      if (_driverCam?.value.isInitialized == true && !_isStreamActive) {
         try {
-          _driverCam!.startImageStream((image) {
+          _isStreamActive = true;
+          await _driverCam!.startImageStream((image) {
             _sendFrame(image, "driver");
-            _driverCam!.stopImageStream();
           });
+          
+          // Stop stream after a short delay
+          await Future.delayed(const Duration(milliseconds: 100));
+          await _driverCam!.stopImageStream();
+          _isStreamActive = false;
         } catch (e) {
-          debugPrint('Erreur stream caméra: $e');
+          debugPrint('❌ Erreur stream caméra: $e');
+          _isStreamActive = false;
         }
       }
     });
@@ -301,54 +343,96 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         _acceleration = (0.5 + (2 * (0.5 - (DateTime.now().second % 5) / 5))).clamp(-3, 3);
       });
     });
+    
+    debugPrint('✅ Surveillance active');
   }
 
   void _stopMonitoring() {
+    debugPrint('⏹️ Arrêt de la surveillance...');
+    
     _frameTimer?.cancel();
     _dataTimer?.cancel();
+    
     try {
-      _driverCam?.stopImageStream();
-      _roadCam?.stopImageStream();
+      if (_isStreamActive) {
+        _driverCam?.stopImageStream();
+        _isStreamActive = false;
+      }
     } catch (e) {
-      debugPrint('Erreur arrêt stream: $e');
+      debugPrint('❌ Erreur arrêt stream: $e');
     }
+    
+    debugPrint('✅ Surveillance arrêtée');
   }
 
   void _sendFrame(CameraImage image, String camType) async {
     try {
-      final imgBuffer = img.Image(width: image.width ~/ 4, height: image.height ~/ 4);
+      // FIXED: Reduced downsampling from /4 to /2 for better quality
+      // Original size might be 640x480, this gives 320x240
+      final downsampleFactor = 2; // Changed from 4
+      
+      final imgBuffer = img.Image(
+        width: image.width ~/ downsampleFactor, 
+        height: image.height ~/ downsampleFactor
+      );
+      
       final yPlane = image.planes[0].bytes;
 
-      for (int y = 0; y < image.height; y += 4) {
-        for (int x = 0; x < image.width; x += 4) {
+      // FIXED: Updated loop to match new downsample factor
+      for (int y = 0; y < image.height; y += downsampleFactor) {
+        for (int x = 0; x < image.width; x += downsampleFactor) {
           final pixel = yPlane[y * image.width + x];
-          imgBuffer.setPixelRgba(x ~/ 4, y ~/ 4, pixel, pixel, pixel, 255);
+          imgBuffer.setPixelRgba(
+            x ~/ downsampleFactor, 
+            y ~/ downsampleFactor, 
+            pixel, pixel, pixel, 255
+          );
         }
       }
 
-      final jpeg = img.encodeJpg(imgBuffer, quality: 40);
+      // FIXED: Increased JPEG quality from 40 to 70
+      final jpeg = img.encodeJpg(imgBuffer, quality: 70);
       final base64String = base64Encode(jpeg);
 
-      _channel?.sink.add(jsonEncode({
+      final payload = jsonEncode({
         'camera': camType,
         'frame': base64String,
         'timestamp': DateTime.now().toIso8601String(),
-      }));
+      });
+      
+      _channel?.sink.add(payload);
+      
+      // Less frequent debug logs to avoid spam
+      if (DateTime.now().second % 3 == 0) {
+        debugPrint('📤 Frame envoyé: ${imgBuffer.width}x${imgBuffer.height}, taille: ${(base64String.length / 1024).toStringAsFixed(1)} KB');
+      }
     } catch (e) {
-      debugPrint('Erreur envoi frame: $e');
+      debugPrint('❌ Erreur envoi frame: $e');
     }
   }
 
   @override
   void dispose() {
+    debugPrint('🧹 Nettoyage des ressources...');
+    
     _borderAnimationController.dispose();
     _pulseAnimationController.dispose();
     _frameTimer?.cancel();
     _dataTimer?.cancel();
+    
+    try {
+      if (_isStreamActive) {
+        _driverCam?.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint('Erreur lors de l\'arrêt du stream: $e');
+    }
+    
     _driverCam?.dispose();
     _roadCam?.dispose();
     _channel?.sink.close();
     _audioPlayer.dispose();
+    
     super.dispose();
   }
 
@@ -357,7 +441,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     return Scaffold(
       body: Stack(
         children: [
-          // Contenu principal
           SafeArea(
             child: Column(
               children: [
@@ -367,7 +450,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
               ],
             ),
           ),
-          // Bordure fine d'alerte
           if (_borderColor != Colors.transparent)
             AnimatedBuilder(
               animation: _borderAnimationController,
@@ -673,7 +755,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Bouton toggle caméras
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -694,7 +775,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
             ),
           ),
           const SizedBox(height: 10),
-          // Bouton monitoring
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -715,12 +795,11 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
             ),
           ),
           const SizedBox(height: 10),
-          // Boutons alertes
           Row(
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () => _triggerAlert(isAlarm: false),
+                  onPressed: () => _triggerAlert(isAlarm: false, message: 'Test Avertissement'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFF9100).withOpacity(0.2),
                     foregroundColor: const Color(0xFFFF9100),
@@ -742,7 +821,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () => _triggerAlert(isAlarm: true),
+                  onPressed: () => _triggerAlert(isAlarm: true, message: 'Test Alarme'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFF1744).withOpacity(0.2),
                     foregroundColor: const Color(0xFFFF1744),
