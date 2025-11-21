@@ -115,59 +115,46 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         debugPrint('📷 Caméra $i: ${widget.cameras[i].lensDirection} - ${widget.cameras[i].name}');
       }
       
-      // Trouver les caméras avant et arrière
+      // Trouver UNIQUEMENT la caméra frontale (selfie)
       CameraDescription? frontCamera;
-      CameraDescription? backCamera;
       
       for (var camera in widget.cameras) {
         if (camera.lensDirection == CameraLensDirection.front) {
           frontCamera = camera;
           debugPrint('✅ Caméra frontale trouvée: ${camera.name}');
-        } else if (camera.lensDirection == CameraLensDirection.back) {
-          backCamera = camera;
-          debugPrint('✅ Caméra arrière trouvée: ${camera.name}');
+          break;
         }
       }
 
-      // Si pas de caméras spécifiques, utiliser les indices
-      if (frontCamera == null && widget.cameras.isNotEmpty) {
-        frontCamera = widget.cameras.length > 1 ? widget.cameras[1] : widget.cameras[0];
-        debugPrint('⚠️ Utilisation caméra par index pour conducteur');
-      }
-      
-      if (backCamera == null && widget.cameras.isNotEmpty) {
-        backCamera = widget.cameras[0];
-        debugPrint('⚠️ Utilisation caméra par index pour route');
+      // Si pas de caméra frontale trouvée, chercher par index
+      if (frontCamera == null && widget.cameras.length > 1) {
+        frontCamera = widget.cameras[1]; // Généralement index 1 = frontale
+        debugPrint('⚠️ Utilisation caméra index 1 (supposée frontale)');
+      } else if (frontCamera == null && widget.cameras.isNotEmpty) {
+        frontCamera = widget.cameras[0];
+        debugPrint('⚠️ Une seule caméra trouvée, utilisation de celle-ci');
       }
 
-      // Initialiser caméra conducteur (frontale)
-      if (frontCamera != null) {
-        _driverCam = CameraController(
-          frontCamera,
-          ResolutionPreset.medium,
-          enableAudio: false,
-        );
-        await _driverCam!.initialize();
-        debugPrint('✅ Caméra conducteur initialisée');
+      if (frontCamera == null) {
+        throw Exception('Aucune caméra disponible');
       }
 
-      // Initialiser caméra route (arrière)
-      if (backCamera != null && backCamera != frontCamera) {
-        _roadCam = CameraController(
-          backCamera,
-          ResolutionPreset.medium,
-          enableAudio: false,
-        );
-        await _roadCam!.initialize();
-        debugPrint('✅ Caméra route initialisée');
-      } else {
-        debugPrint('⚠️ Une seule caméra disponible, réutilisation pour route');
-        _roadCam = _driverCam;
-      }
+      // Initialiser LA MÊME caméra frontale pour conducteur ET route
+      _driverCam = CameraController(
+        frontCamera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+      await _driverCam!.initialize();
+      debugPrint('✅ Caméra conducteur (frontale) initialisée');
+
+      // Utiliser la MÊME caméra pour les deux vues
+      _roadCam = _driverCam;
+      debugPrint('✅ Même caméra utilisée pour les deux vues');
 
       if (mounted) {
         setState(() => _isCameraInitialized = true);
-        debugPrint('🎉 Toutes les caméras sont prêtes!');
+        debugPrint('🎉 Caméra frontale prête pour les deux vues!');
       }
     } catch (e, stackTrace) {
       debugPrint('❌ ERREUR initialisation caméras: $e');
@@ -187,7 +174,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
 
   void _connectWebSocket() {
     try {
-      _channel = IOWebSocketChannel.connect('ws://YOUR_SERVER_IP:8765');
+      _channel = IOWebSocketChannel.connect('ws://192.168.1.159:8765/ws');
       _channel?.stream.listen(
         (message) {
           final alert = jsonDecode(message);
@@ -293,19 +280,17 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   }
 
   void _startMonitoring() {
-    // Timer pour envoyer les frames
+    // Timer pour envoyer les frames (une seule caméra utilisée)
     _frameTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_driverCam?.value.isInitialized == true) {
-        _driverCam!.startImageStream((image) {
-          _sendFrame(image, "driver");
-          _driverCam!.stopImageStream();
-        });
-      }
-      if (_roadCam?.value.isInitialized == true) {
-        _roadCam!.startImageStream((image) {
-          _sendFrame(image, "road");
-          _roadCam!.stopImageStream();
-        });
+        try {
+          _driverCam!.startImageStream((image) {
+            _sendFrame(image, "driver");
+            _driverCam!.stopImageStream();
+          });
+        } catch (e) {
+          debugPrint('Erreur stream caméra: $e');
+        }
       }
     });
 
@@ -412,9 +397,9 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       margin: const EdgeInsets.all(8),
       child: Row(
         children: [
-          Expanded(child: _buildCameraCard(_driverCam, 'Conducteur', Icons.person)),
+          Expanded(child: _buildCameraCard(_driverCam, 'Caméra Selfie', Icons.camera_front)),
           const SizedBox(width: 8),
-          Expanded(child: _buildCameraCard(_roadCam, 'Route', Icons.directions_car)),
+          Expanded(child: _buildCameraCard(_roadCam, 'Vue Conducteur', Icons.person)),
         ],
       ),
     );
