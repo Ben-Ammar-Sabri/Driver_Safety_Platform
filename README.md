@@ -57,3 +57,52 @@ A complete end-to-end platform consisting of:
 
 ## 3. Architecture Overview
 
+- **Flutter App:** captures camera frames, telematics, and sends to backend  
+- **Python Backend:** processes frames, calculates EAR/MAR, triggers alerts  
+- **Dashboard / Workflow:** logs events, computes safety metrics, sends recommendations  
+
+---
+
+## 4. Key Features
+
+- **Driver monitoring:** real-time drowsiness and distraction detection  
+- **Road safety monitoring:** obstacle and lane tracking (future hardware upgrade)  
+- **Real-time alerts:** via WebSocket to app and dashboard  
+- **Data logging:** for fleet managers, insurers, or family monitoring  
+- **Safety score:** aggregated per trip and driver behavior  
+- **Eco-driving guidance:** encourage fuel-efficient driving  
+- **Prototype ready:** fully functional mobile app prototype for testing  
+
+---
+
+## 5. Prototype Note
+
+The **mobile app** replaces hardware for testing purposes:  
+- Utilizes front & rear cameras  
+- Leverages phone sensors (accelerometer, GPS, gyroscope)  
+- Streams all data to backend in real-time  
+
+In production, the mobile app is swapped with **embedded vehicle hardware** while the backend AI engine and dashboard remain unchanged.  
+
+---
+
+## 6. Impact
+
+Haniny provides:  
+- **Accident reduction** through AI monitoring  
+- **Lower insurance costs** with reliable driver behavior metrics  
+- **24/7 automated monitoring** without manual intervention  
+- **Eco-driving guidance** for efficient and safe trips  
+- **Early detection of mechanical issues** from telematics  
+- **Improved safety** for families, fleets, and insurers  
+
+---
+
+## 7. Tech Stack
+
+- **Mobile App:** Flutter  
+- **Backend:** Python 3, asyncio, WebSockets, OpenCV, MediaPipe  
+- **AI Engine:** Drowsiness and yawning detection (EAR/MAR-based)  
+- **Dashboard / Logging:**(database)  
+
+---
