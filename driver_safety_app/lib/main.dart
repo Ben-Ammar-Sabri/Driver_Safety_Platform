@@ -5,6 +5,8 @@ import 'package:camera/camera.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:image/image.dart' as img;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,16 +58,28 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   bool _isMonitoring = false;
   bool _cameraEnabled = true;
   bool _isCameraInitialized = false;
-  bool _isProcessingFrame = false;  // NEW: Prevent frame processing overlap
-  int _frameCount = 0;  // NEW: Track frames sent
-  DateTime? _lastFrameTime;  // NEW: Track timing
+  bool _isProcessingFrame = false;
+  int _frameCount = 0;
+  DateTime? _lastFrameTime;
   
   double _score = 85.0;
-  double _speed = 60.0;
-  double _acceleration = 1.2;
+  double _speed = 0.0; // Changed to actual speed from GPS
+  double _acceleration = 0.0;
   Color _borderColor = Colors.transparent;
   String _alertMessage = '';
   Timer? _dataTimer;
+
+  // Map and GPS variables
+  Completer<GoogleMapController> _mapController = Completer();
+  static final CameraPosition _initialPosition = CameraPosition(
+    target: LatLng(48.8566, 2.3522),
+    zoom: 14.0,
+  );
+  Set<Marker> _markers = {};
+  Position? _currentPosition;
+  StreamSubscription<Position>? _positionStream;
+  double _previousSpeed = 0.0;
+  DateTime? _previousSpeedTime;
 
   @override
   void initState() {
@@ -73,18 +87,100 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     _initializeAnimations();
     _initializeCameras();
     _connectWebSocket();
-    _testAudio();
+    _initializeLocationService();
   }
 
-  void _testAudio() async {
-    await Future.delayed(const Duration(seconds: 2));
-    debugPrint('🧪 Test audio au démarrage...');
-    try {
-      await _audioPlayer.play(AssetSource('sounds/warning.wav'), volume: 0.5);
-      debugPrint('✅ Audio fonctionne!');
-    } catch (e) {
-      debugPrint('❌ Audio ne fonctionne pas: $e');
+  void _initializeLocationService() async {
+    // Check permissions
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      debugPrint('❌ Location services are disabled');
+      return;
     }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        debugPrint('❌ Location permissions are denied');
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      debugPrint('❌ Location permissions are permanently denied');
+      return;
+    }
+
+    // Start listening to location updates
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 1, // Update every 1 meter
+      ),
+    ).listen((Position position) {
+      _updatePosition(position);
+    });
+
+    // Get initial position
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.bestForNavigation,
+      );
+      _updatePosition(position);
+    } catch (e) {
+      debugPrint('❌ Error getting initial position: $e');
+    }
+  }
+
+  void _updatePosition(Position position) {
+    final now = DateTime.now();
+    
+    setState(() {
+      _currentPosition = position;
+      _speed = position.speed * 3.6; // Convert m/s to km/h
+      
+      // Calculate acceleration (m/s²)
+      if (_previousSpeedTime != null) {
+        final timeDiff = now.difference(_previousSpeedTime!).inSeconds;
+        if (timeDiff > 0) {
+          final speedDiff = (_speed - _previousSpeed) / 3.6; // Convert km/h to m/s
+          _acceleration = speedDiff / timeDiff;
+        }
+      }
+      
+      _previousSpeed = _speed;
+      _previousSpeedTime = now;
+    });
+
+    // Update map marker
+    _updateMapMarker(position);
+  }
+
+  void _updateMapMarker(Position position) {
+    final newPosition = LatLng(position.latitude, position.longitude);
+    
+    setState(() {
+      _markers.clear();
+      _markers.add(
+        Marker(
+          markerId: MarkerId('current_location'),
+          position: newPosition,
+          infoWindow: InfoWindow(
+            title: 'Position actuelle',
+            snippet: 'Vitesse: ${_speed.toStringAsFixed(1)} km/h',
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+        ),
+      );
+    });
+
+    // Update camera position if map is ready
+    _mapController.future.then((controller) {
+      controller.animateCamera(
+        CameraUpdate.newLatLng(newPosition),
+      );
+    });
   }
 
   void _initializeAnimations() {
@@ -142,7 +238,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,  // IMPROVED: Better format
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
       await _driverCam!.initialize();
       debugPrint('✅ Caméra conducteur (frontale) initialisée: ${_driverCam!.value.previewSize}');
@@ -261,7 +357,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       debugPrint('❌ Erreur son: $e');
     }
 
-    Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         setState(() {
           _borderColor = Colors.transparent;
@@ -320,16 +416,13 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     _frameCount = 0;
     _lastFrameTime = DateTime.now();
     
-    // IMPROVED: Use continuous image stream with proper throttling
     if (_driverCam?.value.isInitialized == true) {
       _driverCam!.startImageStream((CameraImage image) {
-        // Only process if not already processing and enough time has passed
         final now = DateTime.now();
         final timeSinceLastFrame = _lastFrameTime != null 
             ? now.difference(_lastFrameTime!).inMilliseconds 
             : 1000;
         
-        // Target ~2 FPS (500ms between frames)
         if (!_isProcessingFrame && timeSinceLastFrame >= 500) {
           _isProcessingFrame = true;
           _lastFrameTime = now;
@@ -337,14 +430,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         }
       });
     }
-
-    // Simulation données dynamiques
-    _dataTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      setState(() {
-        _speed = (50 + (30 * (0.5 - (DateTime.now().second % 10) / 10))).clamp(0, 120);
-        _acceleration = (0.5 + (2 * (0.5 - (DateTime.now().second % 5) / 5))).clamp(-3, 3);
-      });
-    });
     
     debugPrint('✅ Surveillance active');
   }
@@ -368,11 +453,9 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     try {
       _frameCount++;
       
-      // IMPROVED: Better YUV420 to RGB conversion
       final int width = image.width;
       final int height = image.height;
       
-      // Downsample for efficiency (320x240 approximately)
       final int targetWidth = 320;
       final int targetHeight = (height * targetWidth / width).round();
       
@@ -385,7 +468,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       final int uvRowStride = image.planes[1].bytesPerRow;
       final int uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
       
-      // Scale factors
       final double scaleX = width / targetWidth;
       final double scaleY = height / targetHeight;
       
@@ -402,7 +484,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
             final int uValue = uPlane[uvIndex];
             final int vValue = vPlane[uvIndex];
             
-            // YUV to RGB conversion
             int r = (yValue + 1.370705 * (vValue - 128)).round().clamp(0, 255);
             int g = (yValue - 0.337633 * (uValue - 128) - 0.698001 * (vValue - 128)).round().clamp(0, 255);
             int b = (yValue + 1.732446 * (uValue - 128)).round().clamp(0, 255);
@@ -412,7 +493,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         }
       }
 
-      // IMPROVED: Better JPEG encoding with quality 80
       final jpeg = img.encodeJpg(imgBuffer, quality: 80);
       final base64String = base64Encode(jpeg);
 
@@ -424,7 +504,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       
       _channel?.sink.add(payload);
       
-      // Log every 5 frames
       if (_frameCount % 5 == 0) {
         final fps = _lastFrameTime != null 
             ? 1000 / DateTime.now().difference(_lastFrameTime!).inMilliseconds 
@@ -438,7 +517,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       debugPrint('❌ Erreur envoi frame: $e');
       debugPrint('Stack: $stackTrace');
     } finally {
-      // Allow next frame to be processed
       _isProcessingFrame = false;
     }
   }
@@ -450,6 +528,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     _borderAnimationController.dispose();
     _pulseAnimationController.dispose();
     _dataTimer?.cancel();
+    _positionStream?.cancel();
     
     try {
       _driverCam?.stopImageStream();
@@ -606,7 +685,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
           const SizedBox(height: 16),
           _buildMetricsRow(),
           const SizedBox(height: 12),
-          Expanded(child: _buildMapPlaceholder()),
+          Expanded(child: _buildMap()),
         ],
       ),
     );
@@ -744,24 +823,25 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     );
   }
 
-  Widget _buildMapPlaceholder() {
+  Widget _buildMap() {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
       ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.map_outlined, size: 48, color: Colors.white.withOpacity(0.3)),
-            const SizedBox(height: 12),
-            Text(
-              'Carte GPS',
-              style: TextStyle(fontSize: 16, color: Colors.white.withOpacity(0.5)),
-            ),
-          ],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: GoogleMap(
+          mapType: MapType.normal,
+          initialCameraPosition: _initialPosition,
+          markers: _markers,
+          onMapCreated: (GoogleMapController controller) {
+            _mapController.complete(controller);
+          },
+          myLocationEnabled: true,
+          myLocationButtonEnabled: true,
+          zoomControlsEnabled: false,
         ),
       ),
     );
@@ -822,54 +902,6 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _triggerAlert(isAlarm: false, message: 'Test Avertissement'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF9100).withOpacity(0.2),
-                    foregroundColor: const Color(0xFFFF9100),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      side: const BorderSide(color: Color(0xFFFF9100), width: 1.5),
-                    ),
-                  ),
-                  child: Column(
-                    children: const [
-                      Icon(Icons.warning_amber, size: 20),
-                      SizedBox(height: 4),
-                      Text('Avertissement', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _triggerAlert(isAlarm: true, message: 'Test Alarme'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF1744).withOpacity(0.2),
-                    foregroundColor: const Color(0xFFFF1744),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      side: const BorderSide(color: Color(0xFFFF1744), width: 1.5),
-                    ),
-                  ),
-                  child: Column(
-                    children: const [
-                      Icon(Icons.emergency, size: 20),
-                      SizedBox(height: 4),
-                      Text('Alarme', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
           ),
         ],
       ),
