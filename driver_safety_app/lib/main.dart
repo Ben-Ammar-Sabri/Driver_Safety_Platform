@@ -5,6 +5,9 @@ import 'package:camera/camera.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:image/image.dart' as img;
+import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,18 +57,19 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   final AudioPlayer _audioPlayer = AudioPlayer();
   
   bool _isMonitoring = false;
-  bool _cameraEnabled = true;
   bool _isCameraInitialized = false;
-  bool _isProcessingFrame = false;  // NEW: Prevent frame processing overlap
-  int _frameCount = 0;  // NEW: Track frames sent
-  DateTime? _lastFrameTime;  // NEW: Track timing
-  
   double _score = 85.0;
-  double _speed = 60.0;
-  double _acceleration = 1.2;
+  double _speed = 0.0;
+  double _acceleration = 0.0;
   Color _borderColor = Colors.transparent;
   String _alertMessage = '';
-  Timer? _dataTimer;
+  Timer? _frameTimer;
+  Timer? _speedTimer;
+  
+  // GPS/Location
+  LatLng _currentLocation = LatLng(36.8065, 10.1815); // Tunis par défaut
+  final MapController _mapController = MapController();
+  StreamSubscription<Position>? _positionStream;
 
   @override
   void initState() {
@@ -73,18 +77,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     _initializeAnimations();
     _initializeCameras();
     _connectWebSocket();
-    _testAudio();
-  }
-
-  void _testAudio() async {
-    await Future.delayed(const Duration(seconds: 2));
-    debugPrint('🧪 Test audio au démarrage...');
-    try {
-      await _audioPlayer.play(AssetSource('sounds/warning.wav'), volume: 0.5);
-      debugPrint('✅ Audio fonctionne!');
-    } catch (e) {
-      debugPrint('❌ Audio ne fonctionne pas: $e');
-    }
+    _startLocationTracking();
   }
 
   void _initializeAnimations() {
@@ -106,8 +99,63 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     );
   }
 
+  Future<void> _startLocationTracking() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        debugPrint('⚠️ Services de localisation désactivés');
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          debugPrint('⚠️ Permission de localisation refusée');
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        debugPrint('⚠️ Permission de localisation refusée définitivement');
+        return;
+      }
+
+      // Obtenir la position actuelle
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      
+      setState(() {
+        _currentLocation = LatLng(position.latitude, position.longitude);
+        _speed = position.speed * 3.6; // Convertir m/s en km/h
+      });
+
+      // Écouter les changements de position
+      _positionStream = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 5, // Mise à jour tous les 5 mètres
+        ),
+      ).listen((Position position) {
+        setState(() {
+          _currentLocation = LatLng(position.latitude, position.longitude);
+          _speed = position.speed * 3.6; // km/h
+          _acceleration = position.speedAccuracy; // Approximation
+        });
+        
+        // Centrer la carte sur la position actuelle
+        _mapController.move(_currentLocation, _mapController.camera.zoom);
+      });
+
+      debugPrint('✅ Suivi GPS activé');
+    } catch (e) {
+      debugPrint('❌ Erreur GPS: $e');
+    }
+  }
+
   Future<void> _initializeCameras() async {
-    if (!_cameraEnabled || widget.cameras.isEmpty) return;
+    if (widget.cameras.isEmpty) return;
     
     try {
       debugPrint('🔍 Nombre de caméras disponibles: ${widget.cameras.length}');
@@ -142,17 +190,16 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,  // IMPROVED: Better format
       );
       await _driverCam!.initialize();
-      debugPrint('✅ Caméra conducteur (frontale) initialisée: ${_driverCam!.value.previewSize}');
+      debugPrint('✅ Caméra conducteur (frontale) initialisée');
 
       _roadCam = _driverCam;
       debugPrint('✅ Même caméra utilisée pour les deux vues');
 
       if (mounted) {
         setState(() => _isCameraInitialized = true);
-        debugPrint('🎉 Caméra frontale prête!');
+        debugPrint('🎉 Caméra frontale prête pour les deux vues!');
       }
     } catch (e, stackTrace) {
       debugPrint('❌ ERREUR initialisation caméras: $e');
@@ -172,87 +219,44 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
 
   void _connectWebSocket() {
     try {
-      // IMPORTANT: Change this IP to your backend server IP
       _channel = IOWebSocketChannel.connect('ws://192.168.1.159:8765/ws');
-      debugPrint('🔌 Tentative de connexion WebSocket...');
-      
       _channel?.stream.listen(
         (message) {
-          debugPrint('📨 Message WebSocket reçu: $message');
-          try {
-            final alert = jsonDecode(message);
-            debugPrint('🔔 Alert décodé: $alert');
-            _handleAlert(alert);
-          } catch (e) {
-            debugPrint('❌ Erreur décodage JSON: $e');
-          }
+          final alert = jsonDecode(message);
+          _handleAlert(alert);
         },
-        onError: (error) {
-          debugPrint('❌ WebSocket erreur: $error');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Erreur WebSocket: $error'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        },
-        onDone: () {
-          debugPrint('⚠️ WebSocket connexion fermée');
-        },
+        onError: (error) => debugPrint('WebSocket erreur: $error'),
       );
-      
-      debugPrint('✅ WebSocket connecté');
     } catch (e) {
-      debugPrint('❌ Connexion WebSocket échouée: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Impossible de se connecter au serveur: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
+      debugPrint('Connexion WebSocket échouée: $e');
     }
   }
 
   void _handleAlert(Map<String, dynamic> alert) {
-    debugPrint('🔔 Traitement alert: $alert');
-    
-    final message = alert['message'] ?? alert['status'] ?? '';
     final isCritical = alert['critical'] == true;
-    
-    debugPrint('  - message: $message');
-    debugPrint('  - critical: $isCritical');
-    
-    if (message != 'OK' && message.isNotEmpty) {
-      _triggerAlert(isAlarm: isCritical, message: message);
-      _updateScore(isCritical ? -5 : -2);
-    }
+    final message = alert['message'] ?? '';
+    _triggerAlert(isAlarm: isCritical, message: message);
+    _updateScore(isCritical ? -5 : -2);
   }
 
   Future<void> _triggerAlert({required bool isAlarm, String message = ''}) async {
-    debugPrint('🚨 Déclenchement alert: isAlarm=$isAlarm, message=$message');
-    
     setState(() {
       _borderColor = isAlarm ? const Color(0xFFFF1744) : const Color(0xFFFF9100);
-      _alertMessage = message.isNotEmpty ? message : (isAlarm ? 'ALARME!' : 'Avertissement');
+      _alertMessage = isAlarm ? 'ALARME!' : 'Avertissement';
     });
 
-    _borderAnimationController.forward(from: 0).then((_) {
+    _borderAnimationController.forward(from: 0).then(() {
       _borderAnimationController.reverse();
     });
     
     try {
       final soundPath = isAlarm ? 'alarm.wav' : 'warning.wav';
-      debugPrint('🔊 Tentative lecture du son: $soundPath');
+      debugPrint('🔊 Lecture du son: $soundPath');
       
       await _audioPlayer.stop();
       await _audioPlayer.play(
         AssetSource('sounds/$soundPath'),
-        volume: 1.0,
+        volume: 0.7, // Réduit de 1.0 à 0.7
         mode: PlayerMode.lowLatency,
       );
       
@@ -261,7 +265,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
       debugPrint('❌ Erreur son: $e');
     }
 
-    Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         setState(() {
           _borderColor = Colors.transparent;
@@ -277,28 +281,11 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     });
   }
 
-  void _toggleCameras() {
-    setState(() {
-      _cameraEnabled = !_cameraEnabled;
-    });
-
-    if (_cameraEnabled) {
-      _initializeCameras();
-    } else {
-      _stopMonitoring();
-      _driverCam?.dispose();
-      _roadCam?.dispose();
-      _driverCam = null;
-      _roadCam = null;
-      _isCameraInitialized = false;
-    }
-  }
-
   void _toggleMonitoring() {
-    if (!_cameraEnabled || !_isCameraInitialized) {
+    if (!_isCameraInitialized) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Veuillez activer les caméras d\'abord'),
+          content: Text('Caméra non initialisée'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -315,153 +302,67 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   }
 
   void _startMonitoring() {
-    debugPrint('🚀 Démarrage de la surveillance...');
-    
-    _frameCount = 0;
-    _lastFrameTime = DateTime.now();
-    
-    // IMPROVED: Use continuous image stream with proper throttling
-    if (_driverCam?.value.isInitialized == true) {
-      _driverCam!.startImageStream((CameraImage image) {
-        // Only process if not already processing and enough time has passed
-        final now = DateTime.now();
-        final timeSinceLastFrame = _lastFrameTime != null 
-            ? now.difference(_lastFrameTime!).inMilliseconds 
-            : 1000;
-        
-        // Target ~2 FPS (500ms between frames)
-        if (!_isProcessingFrame && timeSinceLastFrame >= 500) {
-          _isProcessingFrame = true;
-          _lastFrameTime = now;
-          _sendFrame(image, "driver");
+    // Timer pour envoyer les frames à 3 FPS
+    _frameTimer = Timer.periodic(const Duration(milliseconds: 333), () {
+      if (_driverCam?.value.isInitialized == true) {
+        try {
+          _driverCam!.startImageStream((image) {
+            _sendFrame(image, "driver");
+            _driverCam!.stopImageStream();
+          });
+        } catch (e) {
+          debugPrint('Erreur stream caméra: $e');
         }
-      });
-    }
-
-    // Simulation données dynamiques
-    _dataTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      setState(() {
-        _speed = (50 + (30 * (0.5 - (DateTime.now().second % 10) / 10))).clamp(0, 120);
-        _acceleration = (0.5 + (2 * (0.5 - (DateTime.now().second % 5) / 5))).clamp(-3, 3);
-      });
+      }
     });
-    
-    debugPrint('✅ Surveillance active');
   }
 
   void _stopMonitoring() {
-    debugPrint('⏹️ Arrêt de la surveillance...');
-    
-    _dataTimer?.cancel();
-    
+    _frameTimer?.cancel();
     try {
       _driverCam?.stopImageStream();
-      _isProcessingFrame = false;
+      _roadCam?.stopImageStream();
     } catch (e) {
-      debugPrint('❌ Erreur arrêt stream: $e');
+      debugPrint('Erreur arrêt stream: $e');
     }
-    
-    debugPrint('✅ Surveillance arrêtée (${_frameCount} frames envoyés)');
   }
 
-  Future<void> _sendFrame(CameraImage image, String camType) async {
+  void _sendFrame(CameraImage image, String camType) async {
     try {
-      _frameCount++;
-      
-      // IMPROVED: Better YUV420 to RGB conversion
-      final int width = image.width;
-      final int height = image.height;
-      
-      // Downsample for efficiency (320x240 approximately)
-      final int targetWidth = 320;
-      final int targetHeight = (height * targetWidth / width).round();
-      
-      final imgBuffer = img.Image(width: targetWidth, height: targetHeight);
-      
+      final imgBuffer = img.Image(width: image.width ~/ 4, height: image.height ~/ 4);
       final yPlane = image.planes[0].bytes;
-      final uPlane = image.planes[1].bytes;
-      final vPlane = image.planes[2].bytes;
-      
-      final int uvRowStride = image.planes[1].bytesPerRow;
-      final int uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
-      
-      // Scale factors
-      final double scaleX = width / targetWidth;
-      final double scaleY = height / targetHeight;
-      
-      for (int y = 0; y < targetHeight; y++) {
-        for (int x = 0; x < targetWidth; x++) {
-          final int srcX = (x * scaleX).round();
-          final int srcY = (y * scaleY).round();
-          
-          final int yIndex = srcY * width + srcX;
-          final int uvIndex = (srcY ~/ 2) * uvRowStride + (srcX ~/ 2) * uvPixelStride;
-          
-          if (yIndex < yPlane.length && uvIndex < uPlane.length && uvIndex < vPlane.length) {
-            final int yValue = yPlane[yIndex];
-            final int uValue = uPlane[uvIndex];
-            final int vValue = vPlane[uvIndex];
-            
-            // YUV to RGB conversion
-            int r = (yValue + 1.370705 * (vValue - 128)).round().clamp(0, 255);
-            int g = (yValue - 0.337633 * (uValue - 128) - 0.698001 * (vValue - 128)).round().clamp(0, 255);
-            int b = (yValue + 1.732446 * (uValue - 128)).round().clamp(0, 255);
-            
-            imgBuffer.setPixelRgba(x, y, r, g, b, 255);
-          }
+
+      for (int y = 0; y < image.height; y += 4) {
+        for (int x = 0; x < image.width; x += 4) {
+          final pixel = yPlane[y * image.width + x];
+          imgBuffer.setPixelRgba(x ~/ 4, y ~/ 4, pixel, pixel, pixel, 255);
         }
       }
 
-      // IMPROVED: Better JPEG encoding with quality 80
-      final jpeg = img.encodeJpg(imgBuffer, quality: 80);
+      final jpeg = img.encodeJpg(imgBuffer, quality: 40);
       final base64String = base64Encode(jpeg);
 
-      final payload = jsonEncode({
+      _channel?.sink.add(jsonEncode({
         'camera': camType,
         'frame': base64String,
         'timestamp': DateTime.now().toIso8601String(),
-      });
-      
-      _channel?.sink.add(payload);
-      
-      // Log every 5 frames
-      if (_frameCount % 5 == 0) {
-        final fps = _lastFrameTime != null 
-            ? 1000 / DateTime.now().difference(_lastFrameTime!).inMilliseconds 
-            : 0;
-        debugPrint('📤 Frame #$_frameCount envoyé: ${imgBuffer.width}x${imgBuffer.height}, '
-                   'taille: ${(base64String.length / 1024).toStringAsFixed(1)} KB, '
-                   'FPS: ${fps.toStringAsFixed(1)}');
-      }
-      
-    } catch (e, stackTrace) {
-      debugPrint('❌ Erreur envoi frame: $e');
-      debugPrint('Stack: $stackTrace');
-    } finally {
-      // Allow next frame to be processed
-      _isProcessingFrame = false;
+      }));
+    } catch (e) {
+      debugPrint('Erreur envoi frame: $e');
     }
   }
 
   @override
   void dispose() {
-    debugPrint('🧹 Nettoyage des ressources...');
-    
     _borderAnimationController.dispose();
     _pulseAnimationController.dispose();
-    _dataTimer?.cancel();
-    
-    try {
-      _driverCam?.stopImageStream();
-    } catch (e) {
-      debugPrint('Erreur lors de l\'arrêt du stream: $e');
-    }
-    
+    _frameTimer?.cancel();
+    _speedTimer?.cancel();
+    _positionStream?.cancel();
     _driverCam?.dispose();
     _roadCam?.dispose();
     _channel?.sink.close();
     _audioPlayer.dispose();
-    
     super.dispose();
   }
 
@@ -490,7 +391,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
                         color: _borderColor.withOpacity(_borderAnimationController.value),
                         width: 4,
                       ),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(😎,
                     ),
                     margin: const EdgeInsets.all(4),
                   ),
@@ -505,11 +406,11 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
   Widget _buildCameraViews() {
     return Container(
       height: 140,
-      margin: const EdgeInsets.all(8),
+      margin: const EdgeInsets.all(😎,
       child: Row(
         children: [
           Expanded(child: _buildCameraCard(_driverCam, 'Caméra Selfie', Icons.camera_front)),
-          const SizedBox(width: 8),
+          const SizedBox(width: 😎,
           Expanded(child: _buildCameraCard(_roadCam, 'Vue Conducteur', Icons.person)),
         ],
       ),
@@ -606,7 +507,7 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
           const SizedBox(height: 16),
           _buildMetricsRow(),
           const SizedBox(height: 12),
-          Expanded(child: _buildMapPlaceholder()),
+          Expanded(child: _buildRealMap()),
         ],
       ),
     );
@@ -744,22 +645,55 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
     );
   }
 
-  Widget _buildMapPlaceholder() {
+  Widget _buildRealMap() {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
       ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _currentLocation,
+            initialZoom: 15.0,
+            minZoom: 5.0,
+            maxZoom: 18.0,
+          ),
           children: [
-            Icon(Icons.map_outlined, size: 48, color: Colors.white.withOpacity(0.3)),
-            const SizedBox(height: 12),
-            Text(
-              'Carte GPS',
-              style: TextStyle(fontSize: 16, color: Colors.white.withOpacity(0.5)),
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.driver_safety',
+            ),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: _currentLocation,
+                  width: 40,
+                  height: 40,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2196F3),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2196F3).withOpacity(0.5),
+                          blurRadius: 10,
+                          spreadRadius: 3,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.navigation,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -781,97 +715,24 @@ class _DriverSafetyScreenState extends State<DriverSafetyScreen>
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _toggleCameras,
-              icon: Icon(_cameraEnabled ? Icons.videocam : Icons.videocam_off),
-              label: Text(
-                _cameraEnabled ? 'Désactiver Caméras' : 'Activer Caméras',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _cameraEnabled 
-                    ? const Color(0xFF00E676)
-                    : Colors.grey[700],
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _toggleMonitoring,
+          icon: Icon(_isMonitoring ? Icons.stop : Icons.play_arrow, size: 24),
+          label: Text(
+            _isMonitoring ? 'Arrêter Surveillance' : 'Démarrer Surveillance',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _toggleMonitoring,
-              icon: Icon(_isMonitoring ? Icons.stop : Icons.play_arrow, size: 24),
-              label: Text(
-                _isMonitoring ? 'Arrêter Surveillance' : 'Démarrer Surveillance',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _isMonitoring
-                    ? const Color(0xFFFF5252)
-                    : const Color(0xFF2196F3),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _isMonitoring
+                ? const Color(0xFFFF5252)
+                : const Color(0xFF2196F3),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _triggerAlert(isAlarm: false, message: 'Test Avertissement'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF9100).withOpacity(0.2),
-                    foregroundColor: const Color(0xFFFF9100),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      side: const BorderSide(color: Color(0xFFFF9100), width: 1.5),
-                    ),
-                  ),
-                  child: Column(
-                    children: const [
-                      Icon(Icons.warning_amber, size: 20),
-                      SizedBox(height: 4),
-                      Text('Avertissement', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _triggerAlert(isAlarm: true, message: 'Test Alarme'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF1744).withOpacity(0.2),
-                    foregroundColor: const Color(0xFFFF1744),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      side: const BorderSide(color: Color(0xFFFF1744), width: 1.5),
-                    ),
-                  ),
-                  child: Column(
-                    children: const [
-                      Icon(Icons.emergency, size: 20),
-                      SizedBox(height: 4),
-                      Text('Alarme', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
