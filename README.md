@@ -1,82 +1,59 @@
-# 🚗 Driver Safety Platform
+# 🚗 Haniny - Driver Safety Platform
 
-An intelligent, AI-powered driver monitoring solution designed to improve road safety through continuous real-time analysis of driving behavior and road conditions.
+An intelligent, AI-powered driver monitoring solution designed to improve road safety through **real-time analysis** of driving behavior and road conditions.  
 
-The platform combines an embedded hardware module, advanced AI processing, an automated n8n workflow, and a web dashboard created for insurers, fleet managers, and families.
+Haniny combines a **mobile app prototype**, **Python AI backend**, automated workflows, and a **web dashboard** for insurers, fleet managers, and families.
 
 ---
 
-## 1.  The Problem
+## 1. The Problem
 
 Road accidents are commonly caused by:  
 - Driver distraction  
-- Fatigue  
+- Fatigue or drowsiness  
 - Overspeeding  
 
-Additional challenges include:  
+Additional challenges:  
 - Lack of real-time driving behavior analysis tools  
-- Insurers and companies lacking reliable incident data  
-- Existing solutions depending too much on manual driver input  
+- Insurers and fleet companies lack reliable incident data  
+- Existing solutions rely too heavily on manual driver input  
 
 ➡️ **There is a strong need for an automatic, autonomous, and intelligent driver safety system.**
 
 ---
 
-## 2.  Our Solution: Driver Safety Platform
+## 2. Our Solution: Haniny
 
 A complete end-to-end platform consisting of:
 
-### 🔹 1. Embedded Module
-- Driver-facing dashcam (detects fatigue, distraction)  
-- Road-facing camera (detects obstacles, monitors safe distance)  
-- Telematic sensors (speed, harsh braking, impact detection)
+### 🔹 1. Mobile App Prototype (replaces embedded hardware for testing)
+- **Front-facing camera:** monitors driver attention, fatigue, and yawning  
+- **Rear/road-facing camera:** detects obstacles and monitors safe distance  
+- **Phone sensors:** GPS, accelerometer, gyroscope for telematics data  
+- **Real-time data streaming:** sends frames and sensor data to backend via **WebSockets**  
 
-### 🔹 2. AI Backend
-- Image analysis using Vision AI  
-- Detection of dangerous behaviors  
-- Road obstacle detection  
-- Safety Score computation  
-- Automatic alert generation
+> In production, this will be replaced by a dedicated **in-vehicle hardware module**, while the backend and AI engine remain the same.
+
+### 🔹 2. Python AI Backend
+- WebSocket server receives camera frames and sensor data  
+- Uses **MediaPipe Face Mesh** and custom detection logic to monitor:  
+  - Eye closure (drowsiness detection)  
+  - Yawning (alert for fatigue)  
+- Computes **driver safety score**  
+- Generates **real-time alerts** for unsafe behavior  
 
 ### 🔹 3. Automated Workflow
-- Simulated or real sensor data ingestion  
-- AI processing pipeline  
-- Real-time scoring  
-- Automatic alerts  
-- Logging to Google Sheets / database
+- Ingests real-time data from mobile app or hardware module  
+- Processes images through AI pipeline  
+- Computes safety scores and logs events  
+- Sends alerts automatically to dashboard or external systems  
 
-### 🔹 4. User Dashboard
-- List of recent alerts  
-- Vehicle health and status  
-- Trip history  
-- AI-driven driving recommendations
-
----
-Prototype Note: Mobile App Replacing Hardware
-
-For the prototype phase, the embedded hardware module is temporarily replaced by a mobile application.
-Modern smartphones already include the essential components we need:
-
-Front & rear cameras
-
-Accelerometer & gyroscope
-
-GPS
-
-Stable network connection
-
-This allows the mobile app to simulate all hardware functions, including driver monitoring, road analysis, and telematics data collection.
-
-In production, this mobile-based module will be replaced by a dedicated in-vehicle hardware unit, while the backend, AI engine, and dashboard remain unchanged.
+### 🔹 4. Web Dashboard
+- Displays **recent alerts** and driving events  
+- Monitors **vehicle health** and trip history  
+- Provides **AI-driven recommendations** for safe driving  
 
 ---
 
-## 3.  Impact – Insurance, Fleets, Families
+## 3. Architecture Overview
 
-The Driver Safety Platform enables :  
-- **Accident reduction**  
-- **Lower insurance costs**  
-- **24/7 automated monitoring**  
-- **Eco-driving guidance**  
-- **Early detection of mechanical issues**  
-- **Improved safety for families and businesses**
